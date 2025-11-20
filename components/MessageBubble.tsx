@@ -11,9 +11,11 @@ interface MessageBubbleProps {
 }
 
 // Defined outside component to prevent re-creation on every render
-const ScriptureBlockquote = ({ children }: { children: React.ReactNode }) => {
+// Using 'any' for props to satisfy ReactMarkdown's complex type requirements regarding optional children and extra props
+const ScriptureBlockquote = (props: any) => {
+  const { children } = props;
   const [copied, setCopied] = useState(false);
-  const quoteRef = useRef<HTMLElement>(null);
+  const quoteRef = useRef<HTMLQuoteElement>(null);
 
   const handleCopy = () => {
     if (quoteRef.current) {
