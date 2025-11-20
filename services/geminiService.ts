@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Chat } from "@google/genai";
 import { Message, BibleVersion } from "../types";
 
@@ -70,21 +69,48 @@ export const sendMessageStream = async (
     initializeChat();
   }
 
-  try {
-    const result = await chatSession!.sendMessageStream({ message });
-    
-    for await (const chunk of result) {
-      // chunk is technically a GenerateContentResponse-like object in the new SDK iterator
-      // but strict types might vary, safe to access .text
-      const text = chunk.text;
-      if (text) {
-        onChunk(text);
+  const MAX_RETRIES = 3;
+  const BASE_DELAY = 2000; // Start with 2 seconds delay
+  let lastError: any;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await chatSession!.sendMessageStream({ message });
+      
+      for await (const chunk of result) {
+        // chunk is technically a GenerateContentResponse-like object in the new SDK iterator
+        // but strict types might vary, safe to access .text
+        const text = chunk.text;
+        if (text) {
+          onChunk(text);
+        }
       }
+      return; // Success, exit loop
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check for retryable errors (503 Service Unavailable, 500 Internal Server Error, or "overloaded")
+      const msg = error.message || '';
+      const isRetryable = 
+        msg.includes('503') || 
+        msg.includes('500') || 
+        msg.includes('overloaded') ||
+        msg.includes('unavailable') ||
+        error.status === 503 || 
+        error.status === 500;
+
+      if (!isRetryable || attempt === MAX_RETRIES) {
+        break; // Don't retry if not retryable or max retries reached
+      }
+
+      const delay = BASE_DELAY * Math.pow(2, attempt); // 2s, 4s, 8s
+      console.warn(`Gemini API service unavailable (attempt ${attempt + 1}/${MAX_RETRIES}). Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-  } catch (error) {
-    console.error("Error sending message to Gemini:", error);
-    throw error;
   }
+
+  console.error("Error sending message to Gemini after retries:", lastError);
+  throw lastError;
 };
 
 export const resetChat = () => {
@@ -99,27 +125,28 @@ export const generateChatSummary = async (messages: Message[]): Promise<string> 
     .map(m => `${m.role.toUpperCase()}: ${m.content}`)
     .join('\n\n');
 
-  const prompt = `
-    Please provide a concise theological summary of the following conversation. 
-    Focus on:
-    1. The main questions asked.
-    2. Key scripture verses referenced (citations only).
-    3. The core spiritual or theological conclusions reached.
-    
-    Format the output as a clean Markdown summary with bullet points.
-    
-    Conversation:
-    ${conversationText}
-  `;
+  // Re-instantiate strict client for summary to avoid messing with chat history state
+  const summaryAi = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await summaryAi.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: `
+        Please provide a concise theological summary of the following conversation. 
+        Focus on:
+        1. The main questions asked.
+        2. Key scripture verses referenced (citations only).
+        3. The core spiritual or theological conclusions reached.
+        
+        Format the output as a clean Markdown summary with bullet points.
+        
+        Conversation:
+        ${conversationText}
+      `
     });
     return response.text || "Could not generate summary.";
-  } catch (error) {
-    console.error("Error generating summary:", error);
+  } catch (error: any) {
+    console.error("Summary generation failed:", error);
     throw error;
   }
 };

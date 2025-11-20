@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, memo, useMemo } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { Components } from 'react-markdown';
 import { Message } from '../types';
 import { Bot, Copy, Check, Bookmark, Clock } from 'lucide-react';
 
@@ -54,7 +53,8 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, isBookm
   const [copied, setCopied] = useState(false);
 
   // Memoize the components object to prevent unnecessary re-renders of ReactMarkdown
-  const markdownComponents = useMemo(() => ({
+  // Cast to partial Components to satisfy TS strict checks if necessary, though 'any' in component handles it
+  const markdownComponents: Partial<Components> = useMemo(() => ({
     blockquote: isUser ? undefined : ScriptureBlockquote
   }), [isUser]);
 
